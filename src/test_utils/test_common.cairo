@@ -4,15 +4,21 @@
     use debug::PrintTrait;
     use snforge_std::{start_cheat_caller_address, stop_cheat_caller_address,declare,ContractClassTrait};
     use core::dict::{Felt252Dict, Felt252DictTrait, SquashedFelt252Dict};
-    use kurosawa_akira::LayerAkira::LayerAkira;
     use kurosawa_akira::utils::erc20::{IERC20DispatcherTrait,IERC20Dispatcher};
-    use kurosawa_akira::ILayerAkira::{ILayerAkiraDispatcher, ILayerAkiraDispatcherTrait};
+    use kurosawa_akira::LayerAkiraCore::{ILayerAkiraCoreDispatcher, ILayerAkiraCoreDispatcherTrait};
     use kurosawa_akira::Order::GasFee;
     use kurosawa_akira::utils::SlowModeLogic::SlowModeDelay;
     use serde::Serde;
     use kurosawa_akira::WithdrawComponent::{SignedWithdraw, Withdraw};
     use snforge_std::signature::KeyPairTrait;
     use snforge_std::signature::stark_curve::{ StarkCurveKeyPairImpl, StarkCurveSignerImpl, StarkCurveVerifierImpl};
+
+
+    use kurosawa_akira::LayerAkiraExternalGrantor::{IExternalGrantorDispatcher, IExternalGrantorDispatcherTrait};
+    use kurosawa_akira::LayerAkiraExecutor::{ILayerAkiraExecutorDispatcher, ILayerAkiraExecutorDispatcherTrait};
+
+
+
     fn get_eth_addr() -> ContractAddress {0x049D36570D4e46f48e99674bd3fcc84644DdD6b96F7C741B1562B82f9e004dC7.try_into().unwrap()}
 
     // strk
@@ -63,12 +69,79 @@
         constructor.append(0);
 
         constructor.append(get_fee_recipient_exchange().into());
-        // 'STARRT'.print();
-        // constructor.clone().print();
-        // 'STOP'.print();
+        let (deployed, _) = cls.deploy(@constructor).unwrap();
+        return deployed;
+    }
+
+    fn spawn_core() -> ContractAddress {
+        let cls = declare("LayerAkiraCore").unwrap();
+        let mut constructor: Array::<felt252> = ArrayTrait::new();
+        constructor.append(get_eth_addr().into());
+        constructor.append(get_fee_recipient_exchange().into());
+        
+        let mut serialized_slow_mode: Array<felt252> = ArrayTrait::new();
+        Serde::serialize(@get_slow_mode(), ref serialized_slow_mode);
+        loop {
+            match serialized_slow_mode.pop_front() {
+                Option::Some(felt) => { constructor.append(felt);},
+                Option::None(_) => {break();}
+            }
+        };
+        constructor.append(get_withdraw_action_cost().into());
+        constructor.append(get_fee_recipient_exchange().into());
+        let (deployed, _) = cls.deploy(@constructor).unwrap();
+        return deployed;
+    }
+
+    fn spawn_external_grantor(core_address:ContractAddress) -> ContractAddress {
+        let cls = declare("LayerAkiraExternalGrantor").unwrap();
+        let mut constructor: Array::<felt252> = ArrayTrait::new();
+        // constructor.append(get_eth_addr().into());
+        
+        let mut serialized_slow_mode: Array<felt252> = ArrayTrait::new();
+        Serde::serialize(@get_slow_mode(), ref serialized_slow_mode);
+        loop {
+            match serialized_slow_mode.pop_front() {
+                Option::Some(felt) => { constructor.append(felt);},
+                Option::None(_) => {break();}
+            }
+        };
+        let min_to_route = 200_000_000_000_000_000;
+        constructor.append(min_to_route); // min to route
+        constructor.append(0);
+
+        constructor.append(get_fee_recipient_exchange().into()); // owner
+        constructor.append(core_address.into()); // core address
         
         let (deployed, _) = cls.deploy(@constructor).unwrap();
         return deployed;
+    }
+
+    fn spawn_executor(core_address:ContractAddress, router_address:ContractAddress) -> ContractAddress {
+        let cls = declare("LayerAkiraExecutor").unwrap();
+        let mut constructor: Array::<felt252> = ArrayTrait::new();
+        constructor.append(core_address.into());
+        constructor.append(router_address.into());
+        // constructor.append(get_fee_recipient_exchange().into());
+        // constructor.append(get_eth_addr().into());
+        // constructor.append(get_fee_recipient_exchange().into());
+        let (deployed, _) = cls.deploy(@constructor).unwrap();
+        return deployed;
+    }
+    
+    fn spawn_contracts(mut executor:ContractAddress) -> (ContractAddress,ContractAddress,ContractAddress) {
+        let core = spawn_core();
+        let router = spawn_external_grantor(core);
+        let core_contract = ILayerAkiraCoreDispatcher{contract_address:core};
+        let executor_contract = spawn_executor(core, router);
+        if (executor == 0x0.try_into().unwrap()) { executor = executor_contract}
+        start_cheat_caller_address(core, get_fee_recipient_exchange());core_contract.set_executor(executor);stop_cheat_caller_address(core);
+        start_cheat_caller_address(core, get_trader_address_1());core_contract.grant_access_to_executor();stop_cheat_caller_address(core);
+        start_cheat_caller_address(core, get_trader_address_2());core_contract.grant_access_to_executor();stop_cheat_caller_address(core);
+
+        start_cheat_caller_address(router, get_fee_recipient_exchange());IExternalGrantorDispatcher{contract_address:router}.set_executor(executor);stop_cheat_caller_address(router);
+           
+        (core, router, executor_contract)
     }
 
     fn get_trader_address_1()->ContractAddress {
@@ -88,8 +161,7 @@
                                 0x0461913fd62002100bca4c02e862b2b5160db5c3451d8b9300ff668f91acd27f);
     }
 
-    fn deposit(trader:ContractAddress, amount:u256, token:ContractAddress, akira:ILayerAkiraDispatcher) {
-        
+    fn deposit(trader:ContractAddress, amount:u256, token:ContractAddress, akira:ILayerAkiraCoreDispatcher) {
         let erc = IERC20Dispatcher{contract_address: token};
         let (prev_total_supply,prev_user_balance) = (akira.total_supply(token), akira.balanceOf(trader, token));
         start_cheat_caller_address(token, trader);erc.approve(akira.contract_address, amount);stop_cheat_caller_address(token);
@@ -98,9 +170,9 @@
         assert(akira.balanceOf(trader, token) == prev_user_balance + amount,'WRONG_MINT'); 
     }
 
-    fn prepare_double_gas_fee_native(akira:ILayerAkiraDispatcher, gas_action:u32)-> GasFee {
+    fn prepare_double_gas_fee_native(akira:ILayerAkiraCoreDispatcher, gas_action:u32)-> GasFee {
         GasFee{ gas_per_action:gas_action, fee_token:get_eth_addr(), 
-                max_gas_price: 2 * akira.get_latest_gas_price(), conversion_rate: (1,1),
+                max_gas_price: 2 * 1000, conversion_rate: (1,1),
         }
     }
 

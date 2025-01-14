@@ -117,8 +117,8 @@ impl ConstraintsHashImpl of IStructHash<Constraints> {
     }
 }
 
-// const ORDER_TYPE_HASH: felt252 = selector!("Order(maker:felt,price:u256,qty:Quantity,base:felt,quote:felt,fee:OrderFee,constraints:Constraints,salt:felt,flags:OrderFlags,exchange:felt,source:felt)Constraints(number_of_swaps_allowed:felt,duration_valid:felt,created_at:felt,stp:felt,nonce:felt,min_receive_amount:u256,router_signer:felt)FixedFee(recipient:felt,maker_pbips:felt,taker_pbips:felt,apply_to_receipt_amount:bool)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)OrderFee(trade_fee:FixedFee,router_fee:FixedFee,gas_fee:GasFee)OrderFlags(full_fill_only:bool,best_level_only:bool,post_only:bool,is_sell_side:bool,is_market_order:bool,to_ecosystem_book:bool,external_funds:bool)Quantity(base_qty:u256,quote_qty:u256,base_asset:u256)u256(low:felt,high:felt)");
-const ORDER_TYPE_HASH: felt252 =  0xE61DF9E68BC94ADBD575F0C188FACF8DEA26B7EE0994E554198FAFE8E7BB47;
+// const ORDER_TYPE_HASH: felt252 = selector!("Order(maker:felt,price:u256,qty:Quantity,base:felt,quote:felt,fee:OrderFee,constraints:Constraints,salt:felt,flags:OrderFlags,exchange:felt,source:felt,sign_scheme:felt)Constraints(number_of_swaps_allowed:felt,duration_valid:felt,created_at:felt,stp:felt,nonce:felt,min_receive_amount:u256,router_signer:felt)FixedFee(recipient:felt,maker_pbips:felt,taker_pbips:felt,apply_to_receipt_amount:bool)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)OrderFee(trade_fee:FixedFee,router_fee:FixedFee,gas_fee:GasFee)OrderFlags(full_fill_only:bool,best_level_only:bool,post_only:bool,is_sell_side:bool,is_market_order:bool,to_ecosystem_book:bool,external_funds:bool)Quantity(base_qty:u256,quote_qty:u256,base_asset:u256)u256(low:felt,high:felt)");
+const ORDER_TYPE_HASH: felt252 =  0x2D20F9714788913E1DE79742F8518B427FE1E7398AB0FBDD61C840EE79C1AD3;
 impl OrderHashImpl of IStructHash<Order> {
     fn hash_struct(self: @Order) -> felt252 {
         let mut state = PedersenTrait::new(0);
@@ -135,14 +135,15 @@ impl OrderHashImpl of IStructHash<Order> {
         state = state.update_with(self.flags.hash_struct());
         state = state.update_with(get_contract_address());
         state = state.update_with(*self.source);
-        state = state.update_with(12);
+        state = state.update_with(*self.sign_scheme);
+        state = state.update_with(13);
         state.finalize()
     }
 }
 
 // const WITHDRAW_TYPE_HASH: felt252 = 
-    // selector!("Withdraw(maker:felt,token:felt,amount:u256,salt:felt,gas_fee:GasFee,receiver:felt,exchange:felt)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)u256(low:felt,high:felt)");
-const WITHDRAW_TYPE_HASH: felt252 = 0x17C8204D2795C04835ABB036805B165A4B1CB4D0B6F2994AAF62D17E0B3C5E8;
+    // selector!("Withdraw(maker:felt,token:felt,amount:u256,salt:felt,gas_fee:GasFee,receiver:felt,exchange:felt,sign_scheme:felt)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)u256(low:felt,high:felt)");
+const WITHDRAW_TYPE_HASH: felt252 = 0x2BEA416E56C3B164D794221F7BE94992DBA648F7DF4B3CDC2C9E9EE9131DC68;
 impl WithdrawHashImpl of IStructHash<Withdraw> {
     fn hash_struct(self: @Withdraw) -> felt252 {
         let mut state = PedersenTrait::new(0);
@@ -154,15 +155,16 @@ impl WithdrawHashImpl of IStructHash<Withdraw> {
         state = state.update_with(self.gas_fee.hash_struct());
         state = state.update_with(*self.receiver);
         state = state.update_with(get_contract_address());
-        state = state.update_with(8);
+        state = state.update_with(*self.sign_scheme);
+        state = state.update_with(9);
         state.finalize()
     }
 }
 
 
 // const NONCE_TYPE_HASH: felt252 = 
-//     selector!("OnchainCancelAll(maker:felt,new_nonce:felt,gas_fee:GasFee)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)u256(low:felt,high:felt)");
-const NONCE_TYPE_HASH: felt252 = 0x30e4ca37feb850e0b0e8b214381d47f3c50c3adf1e00062ea7ecdfc1f2192f8;
+//     selector!("OnchainCancelAll(maker:felt,new_nonce:felt,gas_fee:GasFee,sign_scheme:felt)GasFee(gas_per_action:felt,fee_token:felt,max_gas_price:u256,r0:u256,r1:u256)u256(low:felt,high:felt)");
+const NONCE_TYPE_HASH: felt252 = 0x1419e39e06e7e76ddc32635d95dee09599a35d2c8687fc87e22c6e6a803f578;
 impl IncreaseNonceHashImpl of IStructHash<IncreaseNonce> {
     fn hash_struct(self: @IncreaseNonce) -> felt252 {
         let mut state = PedersenTrait::new(0);
@@ -170,7 +172,8 @@ impl IncreaseNonceHashImpl of IStructHash<IncreaseNonce> {
         state = state.update_with(*self.maker);
         state = state.update_with(*self.new_nonce);
         state = state.update_with(self.gas_fee.hash_struct());
-        state = state.update_with(4);
+        state = state.update_with(*self.sign_scheme);
+        state = state.update_with(5);
         state.finalize()
     }
 }

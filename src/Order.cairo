@@ -1,8 +1,6 @@
 use core::traits::Into;
 use starknet::ContractAddress;
 use serde::Serde;
-use poseidon::poseidon_hash_span;
-use array::ArrayTrait;
 use array::SpanTrait;
 use starknet::{get_block_timestamp};
 use kurosawa_akira::utils::common::{min,DisplayContractAddress};
@@ -69,7 +67,8 @@ struct Constraints {
     stp: TakerSelfTradePreventionMode,
     nonce: u32, // maker nonce, for order be valid this nonce must be >= in Nonce component
     min_receive_amount: u256, // minimal amount that user willing to receive from the full mstching of order, default value 0, for now defined for router takers, serves as slippage that filtered on exchange
-    router_signer: ContractAddress, // if taker order is router aka trader outside of our ecosystem then this is router that router this trader to us
+    router_signer: ContractAddress // if taker order is router aka trader outside of our ecosystem then this is router that router this trader to us
+    //depends_on:felt252 // order on fill of order it depends on
 }
 
 #[derive(Copy, Drop, Serde, starknet::Store, PartialEq,Hash)]
@@ -82,7 +81,8 @@ struct Order {
     constraints: Constraints,
     salt: felt252, // random salt for security
     flags: OrderFlags, // various order flags of order
-    source: felt252 // source of liquidity
+    source: felt252, // source of liquidity
+    sign_scheme:felt252 // sign scheme used to sign order
 }
 
 #[derive(Copy, Drop, Serde, PartialEq)]
@@ -186,7 +186,7 @@ fn generic_common_check(maker_order:Order, taker_order:Order) {
 }
 
 
-fn get_gas_fee_and_coin(gas_fee: GasFee, cur_gas_price: u256, native_token:ContractAddress, cur_gas_per_action:u32) -> (u256, ContractAddress) {
+fn get_gas_fee_and_coin(gas_fee: GasFee, cur_gas_price: u256, native_token:ContractAddress, cur_gas_per_action:u32, times:u16) -> (u256, ContractAddress) {
     if cur_gas_price == 0 { return (0, native_token);}
     if gas_fee.gas_per_action == 0 { return (0, native_token);}
     assert!(gas_fee.max_gas_price >= cur_gas_price, "Failed: max_gas_price ({}) >= cur_gas_price ({})", gas_fee.max_gas_price, cur_gas_price);
@@ -200,5 +200,5 @@ fn get_gas_fee_and_coin(gas_fee: GasFee, cur_gas_price: u256, native_token:Contr
 
     let (r0, r1) = gas_fee.conversion_rate;
     let spend_converted = spend_native * r1 / r0;
-    return (spend_converted, gas_fee.fee_token);
+    return (spend_converted * times.into(), gas_fee.fee_token);
 }

@@ -1,10 +1,5 @@
-use core::result::ResultTrait;
-use poseidon::poseidon_hash_span;
-use array::SpanTrait;
-use array::ArrayTrait;
-use serde::Serde;
-use kurosawa_akira::utils::account::AccountABIDispatcherTrait;
-use kurosawa_akira::utils::account::AccountABIDispatcher;
+
+use kurosawa_akira::utils::account::{AccountABIDispatcherTrait, AccountABIDispatcher};
 use starknet::ContractAddress;
 
 fn check_sign(account: ContractAddress, hash: felt252, sign: Span<felt252>) -> bool {

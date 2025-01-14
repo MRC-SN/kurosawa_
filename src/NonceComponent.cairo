@@ -1,8 +1,6 @@
-use kurosawa_akira::Order::GasFee;
+use kurosawa_akira::Order::{GasFee, get_gas_fee_and_coin};
 use starknet::ContractAddress;
 
-use pedersen::PedersenTrait;
-use hash::{HashStateTrait, HashStateExTrait};
 
 use kurosawa_akira::signature::V0OffchainMessage::{OffchainMessageHashImpl};
 use kurosawa_akira::signature::AkiraV0OffchainMessage::{IncreaseNonceHashImpl, SNIP12MetadataImpl};
@@ -14,13 +12,14 @@ struct IncreaseNonce {
     new_nonce: u32,
     gas_fee: GasFee,
     salt: felt252,
+    sign_scheme:felt252
 }
 
 
 #[derive(Copy, Drop, Serde)]
 struct SignedIncreaseNonce {
     increase_nonce: IncreaseNonce,
-    sign: (felt252, felt252),
+    sign: Span<felt252>,
 }
 
 #[starknet::interface]
@@ -55,7 +54,7 @@ mod nonce_component {
 
     #[storage]
     struct Storage {
-        nonces: LegacyMap::<ContractAddress, u32>, // user address to his trading nonce
+        nonces: starknet::storage::Map::<ContractAddress, u32>, // user address to his trading nonce
     }
 
     #[embeddable_as(Nonceable)]
@@ -82,42 +81,20 @@ mod nonce_component {
 
      #[generate_trait]
     impl InternalWithdrawableImpl<TContractState, +HasComponent<TContractState>,
-    +balance_component::HasComponent<TContractState>,+Drop<TContractState>,+ISignerLogic<TContractState>> of InternalNonceable<TContractState> {
+    impl Balance:balance_component::HasComponent<TContractState>,+Drop<TContractState>,+ISignerLogic<TContractState>> of InternalNonceable<TContractState> {
         fn apply_increase_nonce(ref self: ComponentState<TContractState>, signed_nonce_increase: super::SignedIncreaseNonce, gas_price:u256, cur_gas_per_action:u32) {
             let nonce_increase = signed_nonce_increase.increase_nonce;
             let key = nonce_increase.get_message_hash(nonce_increase.maker);
-            let (r,s) = signed_nonce_increase.sign;
-            assert!(self.get_contract().check_sign(nonce_increase.maker, key, r, s), "Failed maker signature check (key, r, s) = ({}, {}, {})", key, r, s);
+            assert!(self.get_contract().check_sign(nonce_increase.maker, key, signed_nonce_increase.sign, nonce_increase.sign_scheme), "Failed maker signature check (key, r, s) = ({})", key);
             assert!(nonce_increase.new_nonce > self.nonces.read(nonce_increase.maker), "Wrong nonce (Failed new_nonce ({}) > prev_nonce ({}))", nonce_increase.new_nonce, self.nonces.read(nonce_increase.maker));
             
-            let mut balancer = self.get_balancer_mut();
-            balancer.validate_and_apply_gas_fee_internal(nonce_increase.maker, nonce_increase.gas_fee, gas_price, 1, cur_gas_per_action);
+            let mut balancer = get_dep_component_mut!(ref self, Balance);
+            let (gas_fee_amount, coin) = super::get_gas_fee_and_coin(nonce_increase.gas_fee, gas_price, balancer.get_wrapped_native_token(), cur_gas_per_action, 1);
+            balancer.internal_transfer(nonce_increase.maker, balancer.get_fee_recipient(), gas_fee_amount, coin);
+            
             self.nonces.write(nonce_increase.maker, nonce_increase.new_nonce);
 
             self.emit(NonceIncrease{ maker: nonce_increase.maker, new_nonce:nonce_increase.new_nonce});
         }
     }
-
-    // this (or something similar) will potentially be generated in the next RC
-    #[generate_trait]
-    impl GetBalancer<
-        TContractState,
-        +HasComponent<TContractState>,
-        +balance_component::HasComponent<TContractState>,
-        +Drop<TContractState>> of GetBalancerTrait<TContractState> {
-        fn get_balancer(
-            self: @ComponentState<TContractState>
-        ) -> @balance_component::ComponentState<TContractState> {
-            let contract = self.get_contract();
-            balance_component::HasComponent::<TContractState>::get_component(contract)
-        }
-
-        fn get_balancer_mut(
-            ref self: ComponentState<TContractState>
-        ) -> balance_component::ComponentState<TContractState> {
-            let mut contract = self.get_contract_mut();
-            balance_component::HasComponent::<TContractState>::get_component_mut(ref contract)
-        }
-    }   
-
 }

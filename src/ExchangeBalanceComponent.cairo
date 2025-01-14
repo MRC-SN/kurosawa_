@@ -13,8 +13,6 @@ trait INewExchangeBalance<TContractState> {
 
     fn get_wrapped_native_token(self: @TContractState) -> ContractAddress;
 
-    fn get_latest_gas_price(self: @TContractState)->u256;
-
     fn get_fee_recipient(self: @TContractState) -> ContractAddress;
 
 }
@@ -94,11 +92,10 @@ mod exchange_balance_logic_component {
 
     #[storage]
     struct Storage {
-        _total_supply: LegacyMap::<ContractAddress, u256>, // TVL per token
-        _balances: LegacyMap::<(ContractAddress, ContractAddress), u256>, // (token, address) -> balance
+        _total_supply: starknet::storage::Map::<ContractAddress, u256>, // TVL per token
+        _balances: starknet::storage::Map::<(ContractAddress, ContractAddress), u256>, // (token, address) -> balance
         wrapped_native_token: ContractAddress, // ERC20 token in which rollup executer pays the gas fee to sequencer
         fee_recipient: ContractAddress, // receiver of exchange fees
-        latest_gas: u256, // latest gas price estimation
     }
 
 
@@ -133,11 +130,10 @@ mod exchange_balance_logic_component {
             };
             return res;
         }
-
+        // remove
         fn get_wrapped_native_token(self: @ComponentState<TContractState>) -> ContractAddress { return self.wrapped_native_token.read();}
 
         fn get_fee_recipient(self: @ComponentState<TContractState>) -> ContractAddress { return self.fee_recipient.read();}
-        fn get_latest_gas_price(self: @ComponentState<TContractState>) -> u256 { return self.latest_gas.read();}
     }
     
     #[generate_trait]
@@ -145,7 +141,6 @@ mod exchange_balance_logic_component {
         fn initializer(ref self: ComponentState<TContractState>, fee_recipient:ContractAddress, wrapped_native_token:ContractAddress) {
             self.wrapped_native_token.write(wrapped_native_token);
             self.fee_recipient.write(fee_recipient);
-            self.latest_gas.write(1000); // some non zero placeholder on init
         }
 
         fn mint(ref self: ComponentState<TContractState>,to: ContractAddress, amount: u256, token: ContractAddress) {
@@ -168,15 +163,6 @@ mod exchange_balance_logic_component {
             self.emit(Transfer{from_:from, to, token, amount});
         }
 
-        fn validate_and_apply_gas_fee_internal(ref self: ComponentState<TContractState>, user: ContractAddress, gas_fee: super::GasFee, gas_price: u256, times:u16, cur_gas_per_action:u32) -> u256 {
-            // Validates that gas_fee correctly specified, calculate how many coins and in what token we tfer from user to exchange  
-            if gas_price == 0 || gas_fee.gas_per_action == 0 { return 0;}
-            let (spent, coin) = super::get_gas_fee_and_coin(gas_fee, gas_price, self.wrapped_native_token.read(), cur_gas_per_action);
-            let spent = spent * times.into(); // we can do gas_price * times.into() to avoid zero spnet  but prefer this way
-            self.internal_transfer(user, self.fee_recipient.read(), spent, coin);
-            return spent;
-        }
-
         fn rebalance_after_trade(ref self: ComponentState<TContractState>, maker:ContractAddress, taker:ContractAddress, ticker:(ContractAddress, ContractAddress),
             amount_base:u256, amount_quote:u256, is_maker_seller:bool) {
             let (base, quote) = ticker;
@@ -193,16 +179,6 @@ mod exchange_balance_logic_component {
                 assert!(self.balanceOf(taker, base) >= amount_base, "Failed: taker base balance ({}) >= trade base amount ({}) -- few balance taker", self.balanceOf(taker, base), amount_base);
                 self.internal_transfer(taker, maker, amount_base, base);
             }
-        }
-
-        fn apply_fixed_fee(ref self: ComponentState<TContractState>, trader:ContractAddress, fee:FixedFee, is_sell_side:bool, ticker:(ContractAddress,ContractAddress), base_amount:u256, quote_amount:u256, is_maker:bool) -> (ContractAddress, u256) {
-            let (b, q) = ticker; 
-            let (fee_token, fee_amount) = if is_sell_side  { 
-                if fee.apply_to_receipt_amount {(q, quote_amount)} else {(b, base_amount)} } 
-                else { if fee.apply_to_receipt_amount {(b, base_amount)} else {(q, quote_amount)} };
-            let fee_amount = get_feeable_qty(fee, fee_amount, is_maker);
-            if fee_amount > 0 { self.internal_transfer(trader, fee.recipient, fee_amount, fee_token);}
-            return (fee_token, fee_amount);
         }
     }
 }
